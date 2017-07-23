@@ -1,4 +1,6 @@
+#-*- coding: utf-8 -*-
 from __future__ import division
+
 
 import argparse
 import codecs
@@ -8,6 +10,7 @@ import os
 import re
 import sys
 import time
+import pdb
 try:
     from urlparse import urljoin
     from urllib import urlretrieve
@@ -38,8 +41,8 @@ CSS_EXPLORE = "a[href='/explore/']"
 CSS_LOGIN = "a[href='/accounts/login/']"
 CSS_FOLLOWERS = "a[href='/{}/followers/']"
 CSS_FOLLOWING = "a[href='/{}/following/']"
-FOLLOWER_PATH = "//div[contains(text(), 'Followers')]"
-FOLLOWING_PATH = "//div[contains(text(), 'Following')]"
+FOLLOWER_PATH = "//div[contains(text(), '팔로워')]"
+FOLLOWING_PATH = "//div[contains(text(), '팔로잉')]"
 
 # JAVASCRIPT COMMANDS
 SCROLL_UP = "window.scrollTo(0, 0);"
@@ -60,7 +63,7 @@ class InstagramCrawler(object):
         Crawler class
     """
     def __init__(self):
-        self._driver = webdriver.Firefox()
+        self._driver = webdriver.Chrome()
 
         self.data = defaultdict(list)
 
@@ -245,27 +248,27 @@ class InstagramCrawler(object):
         )
         follow_ele.click()
 
-        title_ele = WebDriverWait(self._driver, 5).until(
-            EC.presence_of_element_located(
-                (By.XPATH, FOLLOW_PATH))
-        )
-        List = title_ele.find_element_by_xpath(
-            '..').find_element_by_tag_name('ul')
+        title_ele = WebDriverWait(self._driver, 5).until(EC.presence_of_element_located((By.XPATH, FOLLOW_PATH)))
+
+        List = title_ele.find_element_by_xpath('..').find_element_by_tag_name('ul')
+        modal_height = 0 
+        while modal_height != List.size['height'] :
+            modal_height = List.size['height']
+
+            self._driver.execute_script("document.querySelector('div[role=dialog] ul').parentNode.scrollTop = document.querySelector('div[role=dialog] ul').parentNode.scrollHeight;")
+            time.sleep(2)
+            # There is no explicitly expected condition for loading element with scroll down event.
+
+            List = title_ele.find_element_by_xpath('..').find_element_by_tag_name('ul')
+
+
         List.click()
 
         # Loop through list till target number is reached
         num_of_shown_follow = len(List.find_elements_by_xpath('*'))
 
-        while len(List.find_elements_by_xpath('*')) < number:
-            element = List.find_elements_by_xpath('*')[-1]
-            # Work around for now => should use selenium's Expected Conditions!
-            try:
-                element.send_keys(Keys.PAGE_DOWN)
-            except Exception as e:
-                time.sleep(0.1)
-
         follow_items = []
-        for ele in List.find_elements_by_xpath('*')[:number]:
+        for ele in List.find_elements_by_xpath('*'):
             follow_items.append(ele.text.split('\n')[0])
 
         self.data[crawl_type] = follow_items
