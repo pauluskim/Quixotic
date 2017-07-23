@@ -122,8 +122,10 @@ class InstagramCrawler(object):
             self.login(authentication)
 
             # Then browse target page
+            """  Now I dont use this part.
             assert not query.startswith(
                 '#'), "Hashtag does not have followers/following!"
+                """
             self.browse_target_page(query)
             # Scrape captions
             self.scrape_followers_or_following(crawl_type, query, number)
@@ -134,6 +136,7 @@ class InstagramCrawler(object):
         # Save to directory
         print("Saving...")
         self.download_and_save(dir_prefix, query, crawl_type)
+
 
         # Quit driver
         print("Quitting driver...")
@@ -242,10 +245,14 @@ class InstagramCrawler(object):
             FOLLOW_PATH = FOLLOWING_PATH
 
         # Locate follow list
-        follow_ele = WebDriverWait(self._driver, 5).until(
-            EC.presence_of_element_located(
-                (By.CSS_SELECTOR, FOLLOW_ELE.format(query)))
-        )
+        try:
+            follow_ele = WebDriverWait(self._driver, 5).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, FOLLOW_ELE.format(query))))
+        except:
+            # 비공계 계정으로써 팔로워를 확인할 수 없는 경우
+            self.data[crawl_type] = []
+            return
+
         follow_ele.click()
 
         title_ele = WebDriverWait(self._driver, 5).until(EC.presence_of_element_located((By.XPATH, FOLLOW_PATH)))
@@ -331,6 +338,12 @@ def main():
     args = parser.parse_args()
     #  End Argparse #
 
+    visited_list = []
+    recursive_crawl(args, visited_list)
+
+
+def recursive_crawl(args, visited_list):
+
     crawler = InstagramCrawler()
     crawler.crawl(dir_prefix=args.dir_prefix,
                   query=args.query,
@@ -339,6 +352,15 @@ def main():
                   caption=args.caption,
                   authentication=args.authentication)
 
+    visited_list.append(args.query)
+    print("visied list : ", visited_list )
+    # Recursive call
+    if args.crawl_type in ["followers", "following"]:
+        for follower in crawler.data[args.crawl_type]:
+            if not follower in visited_list:
+                print("member list to crawl:", crawler.data[args.crawl_type])
+                args.query = follower
+                recursive_crawl(args, visited_list)
 
 if __name__ == "__main__":
     main()
