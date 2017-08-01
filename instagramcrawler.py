@@ -1,4 +1,9 @@
+#-*- coding: utf-8 -*-
 from __future__ import division
+import sys
+reload(sys)
+sys.setdefaultencoding('utf-8')
+
 
 import argparse
 import codecs
@@ -23,6 +28,9 @@ from selenium.webdriver.common.keys import Keys
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
+import pdb
+
+# python instagramcrawler.py -c -q '#마이홍' -d './myhong' -n 50
 
 # HOST
 HOST = 'http://www.instagram.com'
@@ -217,10 +225,12 @@ class InstagramCrawler(object):
 
             # Parse caption
             try:
+                user_id = self._driver.find_element_by_css_selector('._hghxm a').text
                 time_element = WebDriverWait(self._driver, 5).until(
                     EC.presence_of_element_located((By.TAG_NAME, "time"))
                 )
-                caption = time_element.find_element_by_xpath(
+                caption = user_id + "\n"
+                caption += time_element.find_element_by_xpath(
                     TIME_TO_CAPTION_PATH).text
             except NoSuchElementException:  # Forbidden
                 caption = ""
