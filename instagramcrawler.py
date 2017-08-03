@@ -29,15 +29,16 @@ from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 import pdb
+from preprocess import *
 
 # python instagramcrawler.py -c -q '#마이홍' -d './myhong' -n 50
 
 # HOST
 HOST = 'http://www.instagram.com'
-
 # SELENIUM CSS SELECTOR
 CSS_LOAD_MORE = "a._8imhp._glz1g"
 CSS_RIGHT_ARROW = "a[class='_de018 coreSpriteRightPaginationArrow']"
+CSS_LEFT_ARROW = "a[class='_de018 coreSpriteLeftPaginationArrow']"
 FIREFOX_FIRST_POST_PATH = "//div[contains(@class, '_8mlbc _vbtk2 _t5r8b')]"
 TIME_TO_CAPTION_PATH = "../../../div/ul/li/span"
 
@@ -47,7 +48,7 @@ CSS_LOGIN = "a[href='/accounts/login/']"
 CSS_FOLLOWERS = "a[href='/{}/followers/']"
 CSS_FOLLOWING = "a[href='/{}/following/']"
 FOLLOWER_PATH = "//div[contains(text(), 'Followers')]"
-FOLLOWING_PATH = "//div[contains(text(), 'Following')]"
+XPATH_FOLLOWERS_COUNT = '//*[contains(concat( " ", @class, " " ), concat( " ", "_218yx", " " )) and (((count(preceding-sibling::*) + 1) = 2) and parent::*)]//*[contains(concat( " ", @class, " " ), concat( " ", "_bkw5z", " " ))]'
 
 # JAVASCRIPT COMMANDS
 SCROLL_UP = "window.scrollTo(0, 0);"
@@ -114,12 +115,21 @@ class InstagramCrawler(object):
             # Browse target page
             self.browse_target_page(query)
             # Scroll down until target number photos is reached
-            self.scroll_to_num_of_posts(number)
+            #self.scroll_to_num_of_posts(number)
+
             # Scrape photo links
-            self.scrape_photo_links(number, is_hashtag=query.startswith("#"))
+            #self.scrape_photo_links(number, is_hashtag=query.startswith("#"))
             # Scrape captions if specified
             if caption is True:
-                self.click_and_scrape_captions(number)
+                if query.startswith("#"):
+                    number_posts = WebDriverWait(
+                            self._driver, 10).until(
+                                    EC.presence_of_element_located((By.CSS_SELECTOR, "._bkw5z"))
+                                    ).text
+                    number = refine_number_letters(number_posts) 
+
+
+                self.click_and_scrape_captions(int(number))
 
         elif crawl_type in ["followers", "following"]:
             # Need to login first before crawling followers/following
@@ -166,7 +176,7 @@ class InstagramCrawler(object):
         # scroll page until reached
         loadmore = WebDriverWait(self._driver, 10).until(
             EC.presence_of_element_located(
-                (By.CSS_SELECTOR, CSS_LOAD_MORE))
+                (By.CSS_SELECTOR, "._bkw5z"))
         )
         loadmore.click()
 
@@ -192,7 +202,7 @@ class InstagramCrawler(object):
 
     def click_and_scrape_captions(self, number):
         print("Scraping captions...")
-        captions = []
+        captions = set()
 
         for post_num in range(number):
             sys.stdout.write("\033[F")
@@ -204,38 +214,60 @@ class InstagramCrawler(object):
                     FIREFOX_FIRST_POST_PATH).click()
 
                 if number != 1:  #
-                    WebDriverWait(self._driver, 5).until(
-                        EC.presence_of_element_located(
-                            (By.CSS_SELECTOR, CSS_RIGHT_ARROW)
-                        )
-                    )
+                    while True:
+                        try:
+                            WebDriverWait(self._driver, 0.2).until(
+                                EC.presence_of_element_located(
+                                    (By.CSS_SELECTOR, CSS_RIGHT_ARROW)
+                                )
+                            )
+                            break
+                        except TimeoutException:
+                            continue
 
             elif number != 1:  # Click Right Arrow to move to next post
                 url_before = self._driver.current_url
-                self._driver.find_element_by_css_selector(
-                    CSS_RIGHT_ARROW).click()
+                while True:
+                    try:
+                        self._driver.find_element_by_css_selector(
+                            CSS_RIGHT_ARROW).click()
+                        break
+                    except NoSuchElementException:
+                        try:
+                            self._driver.find_element_by_css_selector(
+                                CSS_LEFT_ARROW)
+                        except NoSuchElementException:
+                            # If there are no left and right arrows, then It should be waited until the arrow appears
+                            continue
+
+                        # If there is only left arrow, then this photo is the last one.
+                        return
 
                 # Wait until the page has loaded
-                try:
-                    WebDriverWait(self._driver, 5).until(
-                        url_change(url_before))
-                except TimeoutException:
-                    print("Time out in caption scraping at number {}".format(post_num))
-                    break
-
+                while True:
+                    try:
+                        WebDriverWait(self._driver, 0.2).until(
+                            url_change(url_before))
+                        break
+                    except TimeoutException:
+                        self._driver.find_element_by_css_selector(
+                            CSS_RIGHT_ARROW).click()
+                        continue
             # Parse caption
             try:
                 user_id = self._driver.find_element_by_css_selector('._hghxm a').text
+                """
                 time_element = WebDriverWait(self._driver, 5).until(
                     EC.presence_of_element_located((By.TAG_NAME, "time"))
                 )
+                """
                 caption = user_id + "\n"
-                caption += time_element.find_element_by_xpath(
-                    TIME_TO_CAPTION_PATH).text
+                #caption += time_element.find_element_by_xpath(
+                #    TIME_TO_CAPTION_PATH).text
             except NoSuchElementException:  # Forbidden
                 caption = ""
 
-            captions.append(caption)
+            captions.add(caption)
 
         self.data['captions'] = captions
 
@@ -303,13 +335,11 @@ class InstagramCrawler(object):
             urlretrieve(photo_link, filepath)
 
         # Save Captions
-        for idx, caption in enumerate(self.data['captions'], 0):
-
-            filename = str(idx) + '.txt'
-            filepath = os.path.join(dir_path, filename)
-
-            with codecs.open(filepath, 'w', encoding='utf-8') as fout:
-                fout.write(caption + '\n')
+        #filename = str(idx) + '.txt'
+        filepath = os.path.join(dir_path, "hashtag_posting_people.txt")
+        with codecs.open(filepath, 'w', encoding='utf-8') as fout:
+            for idx, caption in enumerate(self.data['captions'], 0):
+                fout.write(caption)
 
         # Save followers/following
         filename = crawl_type + '.txt'
@@ -319,6 +349,55 @@ class InstagramCrawler(object):
                 for fol in self.data[crawl_type]:
                     fout.write(fol + '\n')
 
+def check_influencer():
+    crawler = InstagramCrawler()
+
+    candidate_set = influencer_candidates()
+    counter = 1
+    for candidate in candidate_set:
+        if counter != 1:
+            url_before = crawler._driver.current_url
+        else:
+            url_before = ''
+
+        target_url = urljoin(HOST, candidate)
+        crawler._driver.get(target_url)
+
+        while True:
+            try:
+                WebDriverWait(crawler._driver, 0.2).until(
+                    url_change(url_before))
+                break
+            except TimeoutException:
+                crawler._driver.get(target_url)
+                continue
+
+        try:
+            num_followers = crawler._driver.find_element_by_xpath(XPATH_FOLLOWERS_COUNT).text
+        except:
+            # This page was loaded correctly. But this page was broken.
+            continue
+
+        num_followers = refine_number_letters(num_followers) 
+        if int(num_followers) >= 1000:
+            with open("/Users/jack/roka/InstagramCrawler/jack/jack_hashtag/influencer.txt", 'a') as influ_file:
+                line = "".join((candidate, " ", num_followers, "\n"))
+                influ_file.write(line)
+        counter += 1
+
+    print("Quitting driver...")
+    crawler.quit()
+
+def refine_number_letters(number_letter):
+    number_letter = number_letter.replace(",", "")
+    if 'k' in number_letter:
+        number_letter = number_letter.replace('k', '')
+        number_letter = float(number_letter) * 1000
+    if '천' in number_letter:
+        number_letter = number_letter.replace('천', '')
+        number_letter = float(number_letter) * 1000
+    return number_letter
+    
 
 def main():
     #   Arguments  #
