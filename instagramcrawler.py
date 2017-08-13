@@ -42,6 +42,7 @@ CSS_LEFT_ARROW = "a[class='_jra99 coreSpriteLeftPaginationArrow']"
 FIREFOX_FIRST_POST_PATH = "//div[contains(@class, '_mck9w _gvoze _f2mse')]"
 TIME_TO_CAPTION_PATH = "../../../div/ul/li/span"
 
+
 # FOLLOWERS/FOLLOWING RELATED
 CSS_EXPLORE = "a[href='/explore/']"
 CSS_LOGIN = "a[href='/accounts/login/']"
@@ -50,6 +51,12 @@ CSS_FOLLOWING = "a[href='/{}/following/']"
 FOLLOWER_PATH = "//div[contains(text(), 'Followers')]"
 XPATH_FOLLOWERS_COUNT = '//*[contains(concat( " ", @class, " " ), concat( " ", "_bnq48", " " )) and (((count(preceding-sibling::*) + 1) = 2) and parent::*)]//*[contains(concat( " ", @class, " " ), concat( " ", "_fd86t", " " ))]'
 CSS_FOLLOWERS_COUNT = '._218yx:nth-child(2) ._bkw5z'
+
+CSS_NUM_PHOTO_LIKE = "._nzn1h span"
+CSS_USER_ID = "._iadoq"
+CSS_NUM_VIEW = "._m5zti span"
+CSS_NUM_VIDEO_LIKE = "._m10kk span"
+CSS_PLACE = "._60iqg"
 
 # JAVASCRIPT COMMANDS
 SCROLL_UP = "window.scrollTo(0, 0);"
@@ -63,8 +70,7 @@ class url_change(object):
         self.prev_url = prev_url
 
     def __call__(self, driver):
-        return self.prev_url != driver.current_url
-
+        return self.prev_url != driver.current_url 
 class InstagramCrawler(object):
     """
         Crawler class
@@ -128,7 +134,7 @@ class InstagramCrawler(object):
                     number = self.refine_number_letters(number_posts) 
 
 
-                self.click_and_scrape_captions(number)
+                self.click_and_scrape_captions(number, query)
 
         elif crawl_type in ["followers", "following"]:
             # Need to login first before crawling followers/following
@@ -201,7 +207,7 @@ class InstagramCrawler(object):
 
         self.data['photo_links'] = photo_links[begin:number + begin]
 
-    def click_and_scrape_captions(self, number):
+    def click_and_scrape_captions(self, number, query):
         print("Scraping captions...")
         captions = set()
         num_of_influ = 0 
@@ -313,22 +319,28 @@ class InstagramCrawler(object):
             time.sleep(1)
             while True:
                 try:
-                    user_id = self._driver.find_element_by_css_selector("._iadoq").text
+                    user_id = self._driver.find_element_by_css_selector(CSS_USER_ID).text
                     break
                 except:  
                     continue
 
             try:
-                num_like = self._driver.find_element_by_css_selector("._nzn1h span").text
+                num_photo_like = self._driver.find_element_by_css_selector(CSS_NUM_PHOTO_LIKE).text
+                num_video_like = "Photo"
+                num_video_view = ""
             except:
                 try:
-                    num_like = self._driver.find_element_by_css_selector("._oajsw").text
-                    num_like = "Small number"
+                    video_toggle = self._driver.find_element_by_css_selector(CSS_NUM_VIEW)
+                    video_toggle.click()
+                    num_video_view = video_toggle.text
+                    num_video_like = self._driver.find_element_by_css_selector(CSS_NUM_VIDEO_LIKE).text
+                    num_photo_like = 'Video'
                 except:
-                    num_like = "NO LIKE"
-
+                    num_photo_like = "No Like" 
+                    num_video_like = "No Like"
+                    num_video_view = "No Like"
             try:
-                place = self._driver.find_element_by_css_selector("._6y8ij").text
+                place = self._driver.find_element_by_css_selector(CSS_PLACE).text
             except:
                 place = "NoComment"
 
@@ -339,14 +351,19 @@ class InstagramCrawler(object):
             if num_followers >= 1000:
                 num_of_influ += 1
 
-                with open("/Users/jack/roka/InstagramCrawler/myhong/myhong_hashtag/influ_with_meta.txt", 'a') as influ_file:
-                    user = "user_id: " + user_id
-                    num_foll = "Number of followers: " + str(num_followers)
-                    like_line = "LIKE: "+str(num_like)
-                    place_line = "Place: " + place
+                file_path = "/Users/jack/roka/InstagramCrawler/"+query+"/"
+
+                if not os.path.exists(file_path):
+                    os.makedirs(file_path)
+
+                with open(file_path+"influ_with_meta.xls", 'a') as influ_file:
+                    #user = "user_id: " + user_id
+                    #num_foll = "Number of followers: " + str(num_followers)
+                    #like_line = "LIKE: "+str(num_like)
+                    #place_line = "Place: " + place
                     #caption_line = "Contents" + captions
-                    url_addr  = "URL: \n" + current_url
-                    line = "\n".join((str(num_of_influ), user, num_foll, like_line, place_line, url_addr, '\n'))
+                    #url_addr  = "URL: \n" + current_url
+                    line = "\t".join((str(num_of_influ), user_id, str(num_followers), str(num_photo_like), str(num_video_view), str(num_video_like), place, current_url, '\n'))
                     influ_file.write(line)
 
 

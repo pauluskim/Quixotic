@@ -14,3 +14,16 @@ def influencer_candidates():
             candidates_set.add(candidate)
     return candidates_set
                 
+def organize_txt2csv():
+    file_path = '/Users/jack/roka/InstagramCrawler/myhong/filtered/influ_with_meta'
+    with open(file_path+".txt", 'r') as txt, open(file_path+".xls", 'w') as csv:
+        for line in txt:
+            line = line.strip()
+            element = line.split(': ')[-1]
+            if line == '':
+                csv.write('\n')
+            else:
+                csv.write(element+"\t")
+            
+if __name__ == "__main__":
+    organize_txt2csv()
