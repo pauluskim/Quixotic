@@ -30,8 +30,10 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 import pdb
 from preprocess import *
+from langdetect import *
 
 # python instagramcrawler.py -c -q '#마이홍' -d './myhong' -n 50
+# python instagramcrawler.py -c -q '#mysteryskulls' -d './mysteryskulls' -n 50
 
 # HOST
 HOST = 'http://www.instagram.com'
@@ -207,6 +209,25 @@ class InstagramCrawler(object):
 
         self.data['photo_links'] = photo_links[begin:number + begin]
 
+    def korean_detection(self):
+        try:
+            time_element = WebDriverWait(self._driver, 10).until(
+                EC.presence_of_element_located((By.TAG_NAME, "time"))
+            )
+            caption = time_element.find_element_by_xpath(
+                TIME_TO_CAPTION_PATH).text
+        except NoSuchElementException:  # Forbidden
+            print("Caption not found in the {} photo".format(post_num))
+            caption = "No caption"
+
+        try:
+            if detect(caption) == 'ko':
+                return True
+            else:
+                return False
+        except:
+            return False
+        
     def click_and_scrape_captions(self, number, query):
         print("Scraping captions...")
         captions = set()
@@ -281,42 +302,10 @@ class InstagramCrawler(object):
                             except NoSuchElementException:
                                 # If there are no left and right arrows, then It should be waited until the arrow appears
                                 pdb.set_trace()
-            """
-            # Parse caption
-            while True:
-                try:
-                    user_id = WebDriverWait(self._driver, 2).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, "._hghxm a"))
-                    ).text
-                    break
-                except:  
-                    continue
 
-            try:
-                num_like = WebDriverWait(self._driver, 2).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "._tf9x3 span"))
-                ).text
-            except:
-                try:
-                    num_like = WebDriverWait(self._driver, 2).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, "._oajsw"))
-                    ).text
-                    num_like = "Small number"
-                except:
-                    num_like = "NO LIKE"
-
-            try:
-                place = WebDriverWait(self._driver, 2).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "._kul9p._mg7fs"))
-                ).text
-            except:
-                place = "NoComment"
-
-            time_element = WebDriverWait(self._driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "time")))
-            captions = time_element.find_element_by_xpath(TIME_TO_CAPTION_PATH).text
-            """
-            
             time.sleep(1)
+            if not self.korean_detection(): continue # If not korean, then click right arrow.
+
             while True:
                 try:
                     user_id = self._driver.find_element_by_css_selector(CSS_USER_ID).text
@@ -356,7 +345,7 @@ class InstagramCrawler(object):
                 if not os.path.exists(file_path):
                     os.makedirs(file_path)
 
-                with open(file_path+"influ_with_meta.xls", 'a') as influ_file:
+                with open(file_path+"influ_with_meta_ver.ko.xls", 'a') as influ_file:
                     #user = "user_id: " + user_id
                     #num_foll = "Number of followers: " + str(num_followers)
                     #like_line = "LIKE: "+str(num_like)
@@ -383,7 +372,7 @@ class InstagramCrawler(object):
                 try:
                     error_msg = WebDriverWait(checker._driver, 1).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'h2'))).text
                     if error_msg == '죄송합니다. 페이지를 사용할 수 없습니다.': break
-                    else: continue
+                    else:break 
                 except:
                     continue
 
