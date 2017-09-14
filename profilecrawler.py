@@ -178,7 +178,9 @@ class ProfileCrawler(object):
             element = List.find_elements_by_xpath('*')[-1]
             # Work around for now => should use selenium's Expected Conditions!
             r = requests.get('https://www.instagram.com/graphql/query/?query_id=17851374694183129&variables={"id":"1252702687","first":20}')
-            if int(r.status_code) == 429: time.sleep(300)
+            if int(r.status_code) == 429: 
+                pdb.set_trace()
+                time.sleep(300)
             try:
                 element.send_keys(Keys.PAGE_DOWN)
                 if prev_count == len(List.find_elements_by_xpath('*')):

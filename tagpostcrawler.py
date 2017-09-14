@@ -5,14 +5,14 @@ reload(sys)
 sys.setdefaultencoding('utf-8')
 
 
-import argparse
+import argparse 
 import codecs
 from collections import defaultdict
 import json
 import os
 import re
 import sys
-import time
+import time, datetime
 try:
     from urlparse import urljoin
     from urllib import urlretrieve
@@ -36,8 +36,89 @@ from css_xpath import *
 sys.path.append('/Users/jack/roka/Instagram-API-python')
 sys.path.append('/Users/jack/roka/Instagram-API-python/instapi/lib/python2.7/site-packages/')
 from InstagramAPI import InstagramAPI
+from crawl_followers import *
+
+api = InstagramAPI("_______jack______", "ghdlWk37qkqk*")
+api.login() # login
+
+
 # python instagramcrawler.py -c -q '#마이홍' -d './myhong' -n 50
 # python instagramcrawler.py -c -q '#mysteryskulls' -d './mysteryskulls' -n 50
+
+def calculate_engagement_rate(user_id, size):
+    do_crawl = True
+    num_comments = 0
+    num_likes = 0
+    num_views = 0
+    num_media = 0
+
+    while do_crawl:
+        if not 'max_id' in locals(): curl_url = "https://www.instagram.com/"+user_id+"/?__a=1"
+        else : curl_url = "https://www.instagram.com/"+user_id+"/?__a=1&max_id="+max_id
+        response = requests.get(curl_url)
+
+        if response.status_code == 404: return 'Not current user'
+        elif response.status_code == 403:
+            # IP Blocking. SO we need to wait.
+            print str(progress_num) + " : Have to wait cause of 403 status" 
+            time.sleep(200)
+            continue
+    
+        try:
+            media_json = response.json()["user"]["media"]
+        except:
+            pdb.set_trace()
+        for node in media_json["nodes"]:
+            num_media += 1
+            if "likes" in node: num_likes += node["likes"]["count"]
+            if "video_views" in node: num_views += node["video_views"]
+
+        if media_json["page_info"]["has_next_page"]:
+            max_id = media_json["page_info"]["end_cursor"]
+            do_crawl = True
+        else: do_crawl = False
+
+    engagement_rate = float(num_comments + num_likes + num_views) / num_media / size
+
+    return engagement_rate
+
+
+#TODO: 추후 media id와 short code가 불일치하는 녀석들도 잡아내는 코드를 해야함.
+def code_to_media_id(short_code):
+    alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+    media_id = 0;
+    for letter in short_code:
+        media_id = (media_id*64) + alphabet.index(letter)
+
+    return media_id
+
+def GetcommentersAndRecord(media_id, filename, max_id=''):
+    if max_id == '': 
+        # First request without next max_id
+        api.getMediaComments(str(media_id))
+    else: api.getMediaComments(str(media_id), max_id=max_id)
+    commenters = api.LastJson
+
+    commenter_set = set()
+    with open(filename, 'a') as commenters_recorder:
+        try:
+            for comment in commenters["comments"]:
+                if not comment['user']['username'] in commenter_set:
+                    commenters_recorder.write(comment['user']['username']+'\t')
+                    commenter_set.add(comment['user']['username'])
+
+        except KeyError:
+            # In this case, 400 HTTP status occured.
+            # Therefore data were not loaded.
+            # {u'status': u'fail', u'message': u'Please wait a few minutes before you try again.'}
+            print "Time to wait more than 3 min."
+            return maxid
+
+    try:
+        return commenters["next_max_id"]
+    except KeyError:
+        return "End"
+
 
 class url_change(object):
     """
@@ -48,7 +129,7 @@ class url_change(object):
 
     def __call__(self, driver):
         return self.prev_url != driver.current_url 
-class InstagramCrawler(object):
+class TagpostCrawler(object):
     """
         Crawler class
     """
@@ -82,7 +163,6 @@ class InstagramCrawler(object):
             print("Type your username and password by hand to login!")
             print("You have a minute to do so!")
 
-        print("")
         WebDriverWait(self._driver, 60).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, CSS_EXPLORE))
         )
@@ -96,11 +176,7 @@ class InstagramCrawler(object):
         if crawl_type == "photos":
             # Browse target page
             self.browse_target_page(query)
-            # Scroll down until target number photos is reached
-            #self.scroll_to_num_of_posts(number)
 
-            # Scrape photo links
-            #self.scrape_photo_links(number, is_hashtag=query.startswith("#"))
             # Scrape captions if specified
             if caption is True:
                 if query.startswith("#"):
@@ -110,29 +186,7 @@ class InstagramCrawler(object):
                                     ).text
                     number = self.refine_number_letters(number_posts) 
 
-
                 self.click_and_scrape_captions(number, query)
-
-        elif crawl_type in ["followers", "following"]:
-            # Need to login first before crawling followers/following
-            print("You will need to login to crawl {}".format(crawl_type))
-            self.login(authentication)
-
-            # Then browse target page
-            assert not query.startswith(
-                '#'), "Hashtag does not have followers/following!"
-            self.browse_target_page(query)
-            # Scrape captions
-            self.scrape_followers_or_following(crawl_type, query, number)
-        else:
-            print("Unknown crawl type: {}".format(crawl_type))
-            self.quit()
-            return
-        # Save to directory
-        print("Saving...")
-
-        if not query.startswith('#'):
-            self.download_and_save(dir_prefix, query, crawl_type)
 
         # Quit driver
         print("Quitting driver...")
@@ -148,41 +202,6 @@ class InstagramCrawler(object):
         target_url = urljoin(HOST, relative_url)
 
         self._driver.get(target_url)
-
-    def scroll_to_num_of_posts(self, number):
-        # Get total number of posts of page
-        num_info = re.search(r'\], "count": \d+',
-                             self._driver.page_source).group()
-        num_of_posts = int(re.findall(r'\d+', num_info)[0])
-        print("posts: {}, number: {}".format(num_of_posts, number))
-        number = number if number < num_of_posts else num_of_posts
-
-        # scroll page until reached
-        loadmore = WebDriverWait(self._driver, 10).until(
-            EC.presence_of_element_located(
-                (By.CSS_SELECTOR, "._bkw5z"))
-        )
-        loadmore.click()
-
-        num_to_scroll = int((number - 12) / 12) + 1
-        for _ in range(num_to_scroll):
-            self._driver.execute_script(SCROLL_DOWN)
-            time.sleep(0.2)
-            self._driver.execute_script(SCROLL_UP)
-            time.sleep(0.2)
-
-    def scrape_photo_links(self, number, is_hashtag=False):
-        print("Scraping photo links...")
-        encased_photo_links = re.finditer(r'src="([https]+:...[\/\w \.-]*..[\/\w \.-]*'
-                                          r'..[\/\w \.-]*..[\/\w \.-].jpg)', self._driver.page_source)
-
-        photo_links = [m.group(1) for m in encased_photo_links]
-
-        print("Number of photo_links: {}".format(len(photo_links)))
-
-        begin = 0 if is_hashtag else 1
-
-        self.data['photo_links'] = photo_links[begin:number + begin]
 
     def korean_detection(self):
         try:
@@ -212,8 +231,6 @@ class InstagramCrawler(object):
             sys.stdout.write("\033[F")
             print("Scraping captions {} / {}".format(post_num+1,number))
             if post_num == 0:  # Click on the first post
-                # Chrome
-                # self._driver.find_element_by_class_name('_ovg3g').click()
                 url_before = self._driver.current_url
                 self._driver.find_element_by_xpath(
                     FIREFOX_FIRST_POST_PATH).click()
@@ -288,151 +305,25 @@ class InstagramCrawler(object):
                 except:  
                     continue
 
-            try:
-                num_photo_like = self._driver.find_element_by_css_selector(CSS_NUM_PHOTO_LIKE).text
-                num_video_like = "Photo"
-                num_video_view = ""
-            except:
-                try:
-                    video_toggle = self._driver.find_element_by_css_selector(CSS_NUM_VIEW)
-                    video_toggle.click()
-                    num_video_view = video_toggle.text
-                    num_video_like = self._driver.find_element_by_css_selector(CSS_NUM_VIDEO_LIKE).text
-                    num_photo_like = 'Video'
-                except:
-                    num_photo_like = "No Like" 
-                    num_video_like = "No Like"
-                    num_video_view = "No Like"
-            try:
-                place = self._driver.find_element_by_css_selector(CSS_PLACE).text
-            except:
-                place = "NoComment"
+            cur_url = self._driver.current_url
+            short_code = cur_url.split("/p/")[-1].split("/")[0]
+            media_id = code_to_media_id(short_code)
+            api.mediaInfo(media_id)
+            created_at = api.LastJson["items"][0]['taken_at']
+            if datetime.datetime.fromtimestamp(created_at).year != 2017 : continue
 
-            #captions = self._driver.find_element_by_css_selector('._ezgzd:nth-child(1)').text
-            current_url = self._driver.current_url
+            api.searchUsername(user_id)
+            num_followers = api.LastJson['user']['follower_count']
+            if num_followers < 1000: continue
 
-            num_followers = self.num_followers(user_id)
-            if num_followers >= 1000:
-                num_of_influ += 1
+            engagement_rate = calculate_engagement_rate(user_id, num_followers)
 
-                file_path = "/Users/jack/roka/InstagramCrawler/"+query+"/"
-
-                if not os.path.exists(file_path):
-                    os.makedirs(file_path)
-
-                with open(file_path+"influ_with_meta_ver.ko.xls", 'a') as influ_file:
-                    #user = "user_id: " + user_id
-                    #num_foll = "Number of followers: " + str(num_followers)
-                    #like_line = "LIKE: "+str(num_like)
-                    #place_line = "Place: " + place
-                    #caption_line = "Contents" + captions
-                    #url_addr  = "URL: \n" + current_url
-                    line = "\t".join((str(num_of_influ), user_id, str(num_followers), str(num_photo_like), str(num_video_view), str(num_video_like), place, current_url, '\n'))
-                    influ_file.write(line)
-
-
-    def num_followers(self, user_id):
-        checker = InstagramCrawler()
-
-
-        while True:
-            try:
-                checker.browse_target_page(user_id)
-                num_followers = WebDriverWait(checker._driver, 1).until(
-                    EC.presence_of_element_located(
-                        (By.XPATH, XPATH_FOLLOWERS_COUNT))
-                ).text
-                break
-            except:
-                try:
-                    error_msg = WebDriverWait(checker._driver, 1).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'h2'))).text
-                    if error_msg == '죄송합니다. 페이지를 사용할 수 없습니다.': break
-                    else:break 
-                except:
-                    continue
-
-        num_followers = self.refine_number_letters(num_followers) 
-
-        checker.quit()  
-        return num_followers
-
-    def scrape_followers_or_following(self, crawl_type, query, number):
-        print("Scraping {}...".format(crawl_type))
-        if crawl_type == "followers":
-            FOLLOW_ELE = CSS_FOLLOWERS
-            FOLLOW_PATH = FOLLOWER_PATH
-        elif crawl_type == "following":
-            FOLLOW_ELE = CSS_FOLLOWING
-            FOLLOW_PATH = FOLLOWING_PATH
-
-        # Locate follow list
-        follow_ele = WebDriverWait(self._driver, 5).until(
-            EC.presence_of_element_located(
-                (By.CSS_SELECTOR, FOLLOW_ELE.format(query)))
-        )
-        follow_ele.click()
-
-        title_ele = WebDriverWait(self._driver, 5).until(
-            EC.presence_of_element_located(
-                (By.XPATH, FOLLOW_PATH))
-        )
-        List = title_ele.find_element_by_xpath(
-            '..').find_element_by_tag_name('ul')
-        List.click()
-
-        # Loop through list till target number is reached
-        num_of_shown_follow = len(List.find_elements_by_xpath('*'))
-
-        while len(List.find_elements_by_xpath('*')) < number:
-            element = List.find_elements_by_xpath('*')[-1]
-            # Work around for now => should use selenium's Expected Conditions!
-            try:
-                element.send_keys(Keys.PAGE_DOWN)
-            except Exception as e:
-                time.sleep(0.1)
-
-        follow_items = []
-        for ele in List.find_elements_by_xpath('*')[:number]:
-            follow_items.append(ele.text.split('\n')[0])
-
-        self.data[crawl_type] = follow_items
-
-    def download_and_save(self, dir_prefix, query, crawl_type):
-        # Check if is hashtag
-        dir_name = query.lstrip(
-            '#') + '.hashtag' if query.startswith('#') else query
-
-        dir_path = os.path.join(dir_prefix, dir_name)
-        if not os.path.exists(dir_path):
-            os.makedirs(dir_path)
-
-        print("Saving to directory: {}".format(dir_path))
-
-        # Save Photos
-        for idx, photo_link in enumerate(self.data['photo_links'], 0):
-            sys.stdout.write("\033[F")
-            print("Downloading {} images to ".format(idx + 1))
-            # Filename
-            _, ext = os.path.splitext(photo_link)
-            filename = str(idx) + ext
-            filepath = os.path.join(dir_path, filename)
-            # Send image request
-            urlretrieve(photo_link, filepath)
-
-        # Save Captions
-        #filename = str(idx) + '.txt'
-        filepath = os.path.join(dir_path, "hashtag_posting_people.txt")
-        with codecs.open(filepath, 'w', encoding='utf-8') as fout:
-            for idx, caption in enumerate(self.data['captions'], 0):
-                fout.write(caption)
-
-        # Save followers/following
-        filename = crawl_type + '.txt'
-        filepath = os.path.join(dir_path, filename)
-        if len(self.data[crawl_type]):
-            with codecs.open(filepath, 'w', encoding='utf-8') as fout:
-                for fol in self.data[crawl_type]:
-                    fout.write(fol + '\n')
+            dir_path = "./influ_with_engagement_rate/"
+            if not os.path.exists(dir_path):
+                os.makedirs(dir_path)
+            influ_file = dir_path+query+".txt"
+            with open(influ_file, 'a') as f:
+                f.write(user_id+"\t"+str(engagement_rate)+"\t"+cur_url+"\n")
 
     def refine_number_letters(self, number_letter):
         number_letter = number_letter.replace(",", "")
@@ -443,7 +334,6 @@ class InstagramCrawler(object):
             number_letter = number_letter.replace('천', '')
             number_letter = float(number_letter) * 1000
         return int(number_letter)
-        
 
 def main():
     #   Arguments  #
@@ -463,7 +353,7 @@ def main():
     args = parser.parse_args()
     #  End Argparse #
 
-    crawler = InstagramCrawler()
+    crawler = TagpostCrawler()
     crawler.crawl(dir_prefix=args.dir_prefix,
                   query=args.query,
                   crawl_type=args.crawl_type,
@@ -474,3 +364,46 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+"""
+    Crawl commenter and liker
+            user_pk = api.LastJson['user']['pk']
+            prev_max_id = 0
+
+            dir_path = "./"+query+"_reflected/"
+            if not os.path.exists(dir_path):
+                os.makedirs(dir_path)
+            reflected_users_file = dir_path+str(short_code)+".txt"
+            with open(reflected_users_file, 'a') as f:
+                f.write(cur_url+'\n'+user_id+"\n")
+
+            max_id = GetFollowersAndRecord(api, user_pk, reflected_users_file)
+            while True:
+                if max_id == 'End':break
+                elif max_id == prev_max_id: time.sleep(200)
+
+                prev_max_id = max_id
+                max_id = GetFollowersAndRecord(api, user_pk, reflected_users_file, maxid=max_id) 
+
+            api.getMediaLikers(media_id)
+            likers = api.LastJson['users']
+            with open(reflected_users_file, 'a') as f:
+                f.write('\n')
+                for liker in likers:
+                    f.write(liker['username']+"\t")
+                f.write('\n')
+
+            prev_max_id = 0
+            max_id = GetcommentersAndRecord(media_id, reflected_users_file, max_id='')
+
+            while True:
+                if max_id == 'End': break
+                elif max_id == prev_max_id: time.sleep(200)
+
+                prev_max_id = max_id
+                max_id = GetcommentersAndRecord(media_id, reflected_users_file, max_id=max_id)
+"""
